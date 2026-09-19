@@ -1,0 +1,36 @@
+# Environment & Secrets
+.env
+*.env
+config.yaml
+docker-compose.yml
+
+# Binaries & Build Output
+bin/
+dist/
+bot.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.tar
+
+# Go test and coverage
+cover.out
+coverage.html
+
+# IDE & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Agents
+.agents/
+.specify
+specs/**
