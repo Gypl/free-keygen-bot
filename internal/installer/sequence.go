@@ -33,7 +33,7 @@ func randomComment(pool []int) string {
 	return strconv.Itoa(pool[n.Int64()])
 }
 
-// BuildSequence constructs the 7-step installer interaction sequence.
+// BuildSequence constructs the 8-step installer interaction sequence matching olcrtc install.sh.
 func BuildSequence(commentPool []int, suffix string) Sequence {
 	comment := randomComment(commentPool)
 	if suffix == "" {
@@ -44,13 +44,62 @@ func BuildSequence(commentPool []int, suffix string) Sequence {
 
 	return Sequence{
 		Steps: []Step{
-			{Input: "1", FixedDelay: delay},
-			{Input: "1", FixedDelay: delay},
-			{Input: comment, FixedDelay: delay},
-			{Input: "1", FixedDelay: delay},
-			{Input: "", FixedDelay: delay}, // Empty Enter
-			{Input: "n", FixedDelay: delay},
-			{Input: comment + suffix, FixedDelay: delay},
+			// 1. Mode: server (srv)
+			{
+				Input:       "1",
+				WaitFor:     regexp.MustCompile(`(?i)(?:choice\s*\[1-2|select mode)`),
+				WaitTimeout: 2 * time.Minute, // Allow time for initial package installation (git, podman)
+				FixedDelay:  delay,
+			},
+			// 2. Provider: jitsi
+			{
+				Input:       "1",
+				WaitFor:     regexp.MustCompile(`(?i)(?:choice\s*\[1-3|select provider)`),
+				WaitTimeout: 30 * time.Second,
+				FixedDelay:  delay,
+			},
+			// 3. Transport: datachannel
+			{
+				Input:       "1",
+				WaitFor:     regexp.MustCompile(`(?i)(?:choice\s*\[1-4|select transport)`),
+				WaitTimeout: 30 * time.Second,
+				FixedDelay:  delay,
+			},
+			// 4. Jitsi server: choice from pool
+			{
+				Input:       comment,
+				WaitFor:     regexp.MustCompile(`(?i)(?:jitsi server|by default:\s*1|enter the number)`),
+				WaitTimeout: 30 * time.Second,
+				FixedDelay:  delay,
+			},
+			// 5. Room options: auto-generate new room
+			{
+				Input:       "1",
+				WaitFor:     regexp.MustCompile(`(?i)(?:room options|choice\s*\[1-2)`),
+				WaitTimeout: 30 * time.Second,
+				FixedDelay:  delay,
+			},
+			// 6. DNS server: accept default (8.8.8.8:53)
+			{
+				Input:       "",
+				WaitFor:     regexp.MustCompile(`(?i)dns server`),
+				WaitTimeout: 30 * time.Second,
+				FixedDelay:  delay,
+			},
+			// 7. SOCKS5 proxy: no
+			{
+				Input:       "n",
+				WaitFor:     regexp.MustCompile(`(?i)(?:socks5 proxy for egress|y/N)`),
+				WaitTimeout: 30 * time.Second,
+				FixedDelay:  delay,
+			},
+			// 8. Config comment: comment + suffix (wait for build and container launch)
+			{
+				Input:       comment + suffix,
+				WaitFor:     regexp.MustCompile(`(?i)comment for the config`),
+				WaitTimeout: 5 * time.Minute, // Podman pull, go build, and container run
+				FixedDelay:  delay,
+			},
 		},
 	}
 }

@@ -11,6 +11,8 @@ bot.exe
 *.out
 cover.out
 coverage.html
+config.yaml
+docker-compose.yml
 specs/
 .agents/
 .specify/

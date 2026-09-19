@@ -64,6 +64,14 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 	}
 	defer closePTY()
 
+	// In Go 1.20+, ensure the entire process group is killed and PTY closed
+	// if context is canceled while cmd is running or waiting.
+	cmd.Cancel = func() error {
+		killProcess(cmd)
+		closePTY()
+		return nil
+	}
+
 	var output bytes.Buffer
 	var bufMu sync.Mutex
 	outDone := make(chan struct{})
@@ -84,6 +92,8 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 		}
 	}()
 
+	startOffset := 0
+
 	// Execute each interaction step
 	for idx, step := range seq.Steps {
 		if ctx.Err() != nil {
@@ -98,7 +108,8 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 			if waitTimeout <= 0 {
 				waitTimeout = 30 * time.Second
 			}
-			if err := waitForPattern(ctx, &output, &bufMu, step.WaitFor, waitTimeout); err != nil {
+			newOffset, err := waitForPattern(ctx, &output, &bufMu, step.WaitFor, waitTimeout, startOffset)
+			if err != nil {
 				killProcess(cmd)
 				closePTY()
 				<-outDone
@@ -108,6 +119,8 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 				i.logger.Warn("step wait pattern timed out", "step", idx, "input", step.Input, "tail", tail)
 				return "", fmt.Errorf("step %d (%q): %w", idx, step.Input, err)
 			}
+			startOffset = newOffset
+			time.Sleep(50 * time.Millisecond)
 		} else if step.FixedDelay > 0 {
 			select {
 			case <-time.After(step.FixedDelay):
@@ -117,6 +130,9 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 				<-outDone
 				return "", ctx.Err()
 			}
+			bufMu.Lock()
+			startOffset = output.Len()
+			bufMu.Unlock()
 		}
 
 		// Write input + carriage return to terminal
@@ -160,32 +176,37 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 }
 
 // killProcess kills the process group and then the leader process.
-func killProcess(cmd *exec.Cmd) error {
+func killProcess(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
-		return nil
+		return
 	}
 	killProcessGroup(cmd) // Platform-specific: kill entire process group
-	return cmd.Process.Kill()
+	_ = cmd.Process.Kill()
 }
 
-func waitForPattern(ctx context.Context, buf *bytes.Buffer, mu *sync.Mutex, re *regexp.Regexp, timeout time.Duration) error {
+func waitForPattern(ctx context.Context, buf *bytes.Buffer, mu *sync.Mutex, re *regexp.Regexp, timeout time.Duration, startOffset int) (int, error) {
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(150 * time.Millisecond)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return startOffset, ctx.Err()
 		case <-ticker.C:
 			mu.Lock()
-			matched := re.Match(buf.Bytes())
+			var chunk []byte
+			if buf.Len() > startOffset {
+				chunk = buf.Bytes()[startOffset:]
+			}
+			matched := len(chunk) > 0 && re.Match(chunk)
+			curLen := buf.Len()
 			mu.Unlock()
 			if matched {
-				return nil
+				return curLen, nil
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout waiting for pattern %s", re.String())
+				return curLen, fmt.Errorf("timeout waiting for pattern %s", re.String())
 			}
 		}
 	}
