@@ -71,7 +71,8 @@ func makeMessage(userID int64, username string, chatID int64, cmd string) *tgbot
 			UserName: username,
 		},
 		Chat: &tgbotapi.Chat{
-			ID: chatID,
+			ID:   chatID,
+			Type: "private",
 		},
 		Text: "/" + cmd,
 		Entities: []tgbotapi.MessageEntity{
@@ -393,6 +394,7 @@ func TestEscapeMarkdownV2Text(t *testing.T) {
 		{input: "test_bold*italic", expected: `test\_bold\*italic`},
 		{input: "[link](url)", expected: `\[link\]\(url\)`},
 		{input: "a+b=c", expected: `a\+b\=c`},
+		{input: `test\slash`, expected: `test\\slash`},
 	}
 	for _, tt := range tests {
 		got := escapeMarkdownV2Text(tt.input)
@@ -401,3 +403,116 @@ func TestEscapeMarkdownV2Text(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleUpdate_NilSender(t *testing.T) {
+	sender := &mockSender{}
+	h := newTestHandler(sender, []int64{100}, 0, &mockDeployer{})
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			From: nil,
+			Chat: &tgbotapi.Chat{ID: 100, Type: "private"},
+			Text: "/deploy",
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bot_command", Offset: 0, Length: 7},
+			},
+		},
+	}
+
+	// Should not panic
+	h.HandleUpdate(context.Background(), update)
+	if len(sender.getMessages()) != 0 {
+		t.Errorf("expected no messages when sender is nil")
+	}
+}
+
+func TestHandleUpdate_NonPrivateChat(t *testing.T) {
+	sender := &mockSender{}
+	deployer := &mockDeployer{}
+	h := newTestHandler(sender, []int64{100}, 0, deployer)
+
+	update := tgbotapi.Update{
+		Message: &tgbotapi.Message{
+			From: &tgbotapi.User{ID: 100, UserName: "alice"},
+			Chat: &tgbotapi.Chat{ID: -100123456, Type: "supergroup"},
+			Text: "/deploy",
+			Entities: []tgbotapi.MessageEntity{
+				{Type: "bot_command", Offset: 0, Length: 7},
+			},
+		},
+	}
+
+	h.HandleUpdate(context.Background(), update)
+	if atomic.LoadInt64(&deployer.callCount) != 0 {
+		t.Errorf("deployer should not be called in non-private chat")
+	}
+
+	msgs := sender.getMessages()
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "только в личных сообщениях") {
+		t.Errorf("expected private chat warning, got: %v", msgs)
+	}
+}
+
+func TestHandleDeploy_WithArguments(t *testing.T) {
+	sender := &mockSender{}
+	deployer := &mockDeployer{}
+	h := newTestHandler(sender, []int64{100}, 0, deployer)
+
+	msg := &tgbotapi.Message{
+		From: &tgbotapi.User{ID: 100, UserName: "alice"},
+		Chat: &tgbotapi.Chat{ID: 100, Type: "private"},
+		Text: "/deploy unexpected_arg",
+		Entities: []tgbotapi.MessageEntity{
+			{Type: "bot_command", Offset: 0, Length: 7},
+		},
+	}
+
+	h.HandleDeploy(context.Background(), msg)
+	if atomic.LoadInt64(&deployer.callCount) != 0 {
+		t.Errorf("deployer should not be called when arguments are provided")
+	}
+
+	msgs := sender.getMessages()
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "не принимает параметров") {
+		t.Errorf("expected no-args warning, got: %v", msgs)
+	}
+}
+
+type failMarkdownSender struct {
+	mockSender
+}
+
+func (f *failMarkdownSender) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	if msg, ok := c.(tgbotapi.MessageConfig); ok {
+		if msg.ParseMode == tgbotapi.ModeMarkdownV2 {
+			return tgbotapi.Message{}, errors.New("Bad Request: can't parse entities")
+		}
+	}
+	return f.mockSender.Send(c)
+}
+
+func TestHandleDeploy_MarkdownFallback(t *testing.T) {
+	sender := &failMarkdownSender{}
+	deployer := &mockDeployer{
+		deployFunc: func(ctx context.Context) (string, error) {
+			return "olcrtc://test-uri", nil
+		},
+	}
+	h := newTestHandler(sender, []int64{100}, 0, deployer)
+
+	msg := makeMessage(100, "alice", 100, "deploy")
+	h.HandleDeploy(context.Background(), msg)
+
+	msgs := sender.getMessages()
+	// Should have sent: 1) status "Запускаю установку...", 2) fallback plain text "✅ Готово!\nolcrtc://test-uri"
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	if msgs[1].ParseMode != "" {
+		t.Errorf("expected plain text fallback, got parse mode: %s", msgs[1].ParseMode)
+	}
+	if !strings.Contains(msgs[1].Text, "olcrtc://test-uri") {
+		t.Errorf("expected fallback message to contain URI, got: %s", msgs[1].Text)
+	}
+}
+

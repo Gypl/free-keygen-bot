@@ -2,6 +2,7 @@ package logging
 
 import (
 	"log/slog"
+	"regexp"
 	"strings"
 )
 
@@ -38,7 +39,27 @@ func (u VPNURI) String() string {
 	return string(u)
 }
 
-// SanitizeAttr is a slog.HandlerOptions.ReplaceAttr hook that masks sensitive keys
+var (
+	vpnURIPattern = regexp.MustCompile(`(?i)\b(olcrtc|vless|vmess|trojan|ss|ssr|hysteria|hysteria2|tuic|wireguard)://[^\s'"]+`)
+	keyPattern    = regexp.MustCompile(`(?i)(key:?\s*)([0-9a-fA-F]{16,})`)
+	tokenPattern  = regexp.MustCompile(`\b\d{8,12}:[a-zA-Z0-9_-]{30,50}\b`)
+)
+
+// MaskSensitive masks sensitive patterns (VPN URIs, private keys, bot tokens) in free-form text.
+func MaskSensitive(s string) string {
+	s = vpnURIPattern.ReplaceAllStringFunc(s, func(match string) string {
+		idx := strings.Index(match, "://")
+		if idx != -1 {
+			return match[:idx+3] + "[REDACTED]"
+		}
+		return "[REDACTED_URI]"
+	})
+	s = keyPattern.ReplaceAllString(s, "${1}[REDACTED]")
+	s = tokenPattern.ReplaceAllString(s, "[REDACTED]")
+	return s
+}
+
+// SanitizeAttr is a slog.HandlerOptions.ReplaceAttr hook that masks sensitive keys and values.
 func SanitizeAttr(groups []string, a slog.Attr) slog.Attr {
 	// Standardize time formatting if desired
 	if a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
@@ -59,5 +80,14 @@ func SanitizeAttr(groups []string, a slog.Attr) slog.Attr {
 		}
 	}
 
+	if a.Value.Kind() == slog.KindString {
+		str := a.Value.String()
+		masked := MaskSensitive(str)
+		if masked != str {
+			return slog.String(a.Key, masked)
+		}
+	}
+
 	return a
 }
+

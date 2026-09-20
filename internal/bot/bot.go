@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -13,6 +15,7 @@ type Bot struct {
 	api     *tgbotapi.BotAPI
 	handler *Handler
 	logger  *slog.Logger
+	wg      sync.WaitGroup
 }
 
 // New creates a new Bot instance.
@@ -47,21 +50,24 @@ func (b *Bot) Start(ctx context.Context) error {
 
 	b.logger.Info("bot polling started")
 
+loop:
 	for {
 		select {
 		case <-ctx.Done():
 			b.logger.Info("shutting down bot polling...")
 			b.api.StopReceivingUpdates()
-			return nil
+			break loop
 
 		case update, ok := <-updates:
 			if !ok {
 				b.logger.Info("updates channel closed")
-				return nil
+				break loop
 			}
 
 			// Process each update in a separate goroutine so slow installs don't block other commands
+			b.wg.Add(1)
 			go func(up tgbotapi.Update) {
+				defer b.wg.Done()
 				defer func() {
 					if r := recover(); r != nil {
 						b.logger.Error("panic in update handler", "panic", r, "update_id", up.UpdateID)
@@ -71,4 +77,20 @@ func (b *Bot) Start(ctx context.Context) error {
 			}(update)
 		}
 	}
+
+	// Wait for any in-flight update handlers to complete
+	done := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		b.logger.Info("all in-flight updates completed")
+	case <-time.After(15 * time.Second):
+		b.logger.Warn("timeout waiting for in-flight updates to complete")
+	}
+
+	return nil
 }

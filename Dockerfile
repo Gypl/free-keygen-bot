@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fuse-overlayfs \
     iptables \
     procps \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure Podman storage for containerized execution

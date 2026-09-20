@@ -8,7 +8,7 @@ import (
 
 var (
 	ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
-	uriRe  = regexp.MustCompile(`(?m)^\s*uri:\s*(\S+)\s*$`)
+	uriRe  = regexp.MustCompile(`(?m)^\s*uri:\s*(.+?)\s*$`)
 )
 
 // ExtractURI searches the installer output for the last "uri: <link>" line and returns the URI.

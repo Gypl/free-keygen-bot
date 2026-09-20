@@ -21,6 +21,7 @@ func TestMasking(t *testing.T) {
 		"config_uri", uri,
 		"plain_secret", "super_secret_value",
 		"plain_uri", "trojan://pass@5.6.7.8:443",
+		"tail", "Output:\nEncryption key: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4\nuri: olcrtc://jitsi?datachannel@room#key$comment\nDone.",
 	)
 
 	out := buf.String()
@@ -37,12 +38,21 @@ func TestMasking(t *testing.T) {
 	if strings.Contains(out, "pass@5.6.7.8") {
 		t.Errorf("plain_uri leaked in output: %s", out)
 	}
+	if strings.Contains(out, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4") {
+		t.Errorf("encryption key leaked in tail: %s", out)
+	}
+	if strings.Contains(out, "room#key$comment") {
+		t.Errorf("raw uri leaked in tail: %s", out)
+	}
 
 	if !strings.Contains(out, "vless://[REDACTED]") {
 		t.Errorf("expected vless://[REDACTED], got %s", out)
 	}
 	if !strings.Contains(out, "trojan://[REDACTED]") {
 		t.Errorf("expected trojan://[REDACTED], got %s", out)
+	}
+	if !strings.Contains(out, "olcrtc://[REDACTED]") {
+		t.Errorf("expected olcrtc://[REDACTED], got %s", out)
 	}
 }
 

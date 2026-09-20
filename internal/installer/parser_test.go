@@ -62,6 +62,14 @@ All done.`,
 			expectedURI: "olcrtc://jitsi?datachannel@room-abc123#e4f5a6b7$4welcome",
 			expectErr:   false,
 		},
+		{
+			name: "olcrtc URI with spaces in comment",
+			output: "[OK] Starting olcrtc server...\n" +
+				"uri: olcrtc://jitsi?datachannel@room-abc123#e4f5a6b7$olc - t.me/openlibrecommunity   \r\n" +
+				"[OK] Done.",
+			expectedURI: "olcrtc://jitsi?datachannel@room-abc123#e4f5a6b7$olc - t.me/openlibrecommunity",
+			expectErr:   false,
+		},
 	}
 
 	for _, tt := range tests {

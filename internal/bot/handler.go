@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +79,22 @@ func (h *Handler) HandleUpdate(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
+	if update.Message.Chat == nil {
+		return
+	}
+
+	// The bot only supports 1:1 private chats
+	if !update.Message.Chat.IsPrivate() {
+		h.logger.Warn("ignoring command from non-private chat", "chat_id", update.Message.Chat.ID, "chat_type", update.Message.Chat.Type)
+		h.sendPlain(update.Message.Chat.ID, "⚠️ Бот работает только в личных сообщениях.")
+		return
+	}
+
+	if update.Message.From == nil {
+		h.logger.Warn("ignoring command with nil sender", "chat_id", update.Message.Chat.ID)
+		return
+	}
+
 	switch update.Message.Command() {
 	case "start":
 		h.HandleStart(update.Message)
@@ -96,9 +113,19 @@ func (h *Handler) HandleStart(msg *tgbotapi.Message) {
 
 // HandleDeploy processes the /deploy command with auth, cooldown, single-flight lock, and execution.
 func (h *Handler) HandleDeploy(ctx context.Context, msg *tgbotapi.Message) {
+	if msg.From == nil || msg.Chat == nil {
+		return
+	}
+
 	userID := msg.From.ID
 	username := msg.From.UserName
 	chatID := msg.Chat.ID
+
+	// Reject any arguments to /deploy to satisfy security policy
+	if strings.TrimSpace(msg.CommandArguments()) != "" {
+		h.sendPlain(chatID, "⚠️ Команда /deploy не принимает параметров. Отправьте просто /deploy.")
+		return
+	}
 
 	// 1. Check Allowlist
 	if !h.IsAllowed(userID) {
@@ -119,8 +146,12 @@ func (h *Handler) HandleDeploy(ctx context.Context, msg *tgbotapi.Message) {
 		elapsed := time.Since(lastDeploy)
 		if elapsed < h.cooldown {
 			remaining := h.cooldown - elapsed
-			mins := int(remaining.Minutes())
-			secs := int(remaining.Seconds()) % 60
+			totalSecs := int(math.Ceil(remaining.Seconds()))
+			if totalSecs < 1 {
+				totalSecs = 1
+			}
+			mins := totalSecs / 60
+			secs := totalSecs % 60
 			h.auditLogger.Log(ctx, logging.AuditEvent{
 				ActorID:  userID,
 				Username: username,
@@ -148,7 +179,8 @@ func (h *Handler) HandleDeploy(ctx context.Context, msg *tgbotapi.Message) {
 	defer h.installLock.Unlock()
 
 	// 4. Send acknowledgment status message
-	h.sendPlain(chatID, "⏳ Запускаю установку...")
+	h.logger.Info("starting vpn installation", "user_id", userID, "username", username)
+	h.sendPlain(chatID, "⏳ Запускаю установку... Это может занять 2–4 минуты (скачивание образов и компиляция). Пожалуйста, подождите.")
 
 	// 5. Run installation
 	startTime := time.Now()
@@ -197,6 +229,7 @@ func (h *Handler) HandleDeploy(ctx context.Context, msg *tgbotapi.Message) {
 
 	// 7. Success
 	h.cooldowns.Store(userID, time.Now())
+	h.logger.Info("vpn deployment completed successfully", "user_id", userID, "duration", duration)
 	h.auditLogger.Log(ctx, logging.AuditEvent{
 		ActorID:  userID,
 		Username: username,
@@ -207,21 +240,31 @@ func (h *Handler) HandleDeploy(ctx context.Context, msg *tgbotapi.Message) {
 
 	escapedURI := escapeMarkdownCode(uri)
 	replyText := fmt.Sprintf("%s\n`%s`", escapeMarkdownV2Text("✅ Готово!"), escapedURI)
-	h.sendMarkdownV2(chatID, replyText)
+	fallbackText := fmt.Sprintf("✅ Готово!\n%s", uri)
+	h.sendMarkdownV2(chatID, replyText, fallbackText)
 }
 
 func (h *Handler) sendPlain(chatID int64, text string) {
+	if h.sender == nil {
+		h.logger.Error("message sender is not initialized", "chat_id", chatID)
+		return
+	}
 	msg := tgbotapi.NewMessage(chatID, text)
 	if _, err := h.sender.Send(msg); err != nil {
 		h.logger.Error("failed to send plain telegram message", "chat_id", chatID, "error", err)
 	}
 }
 
-func (h *Handler) sendMarkdownV2(chatID int64, text string) {
+func (h *Handler) sendMarkdownV2(chatID int64, text string, fallbackText string) {
+	if h.sender == nil {
+		h.logger.Error("message sender is not initialized", "chat_id", chatID)
+		return
+	}
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = tgbotapi.ModeMarkdownV2
 	if _, err := h.sender.Send(msg); err != nil {
-		h.logger.Error("failed to send markdown telegram message", "chat_id", chatID, "error", err)
+		h.logger.Error("failed to send markdown telegram message, falling back to plain text", "chat_id", chatID, "error", err)
+		h.sendPlain(chatID, fallbackText)
 	}
 }
 
@@ -229,6 +272,7 @@ func (h *Handler) sendMarkdownV2(chatID int64, text string) {
 // See https://core.telegram.org/bots/api#markdownv2-style
 func escapeMarkdownV2Text(s string) string {
 	replacer := strings.NewReplacer(
+		`\`, `\\`,
 		`_`, `\_`,
 		`*`, `\*`,
 		`[`, `\[`,

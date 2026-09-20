@@ -3,8 +3,10 @@ package installer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -12,6 +14,11 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+)
+
+var (
+	jitsiURLPromptRe = regexp.MustCompile(`(?i)enter jitsi url:`)
+	fallbackJitsiURL = "https://meet.egovm.ru"
 )
 
 // Installer runs the automated installation inside a PTY session.
@@ -47,8 +54,9 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 
 	seq := BuildSequence(i.commentPool, i.commentSuffix)
 
-	shellCmd := fmt.Sprintf("curl -fsSL %s | bash", i.scriptURL)
+	shellCmd := fmt.Sprintf("curl -fsSL %q | bash", i.scriptURL)
 	cmd := exec.CommandContext(ctx, "bash", "-c", shellCmd)
+	cmd.WaitDelay = 5 * time.Second
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -60,16 +68,22 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 	// even if child processes still hold the PTY slave fd open.
 	var ptmxCloseOnce sync.Once
 	closePTY := func() {
-		ptmxCloseOnce.Do(func() { _ = ptmx.Close() })
+		ptmxCloseOnce.Do(func() {
+			if ptmx != nil {
+				_ = ptmx.Close()
+			}
+		})
 	}
-	defer closePTY()
 
-	// In Go 1.20+, ensure the entire process group is killed and PTY closed
-	// if context is canceled while cmd is running or waiting.
-	cmd.Cancel = func() error {
-		killProcess(cmd)
-		closePTY()
-		return nil
+	var (
+		waitOnce sync.Once
+		waitErr  error
+	)
+	waitProcess := func() error {
+		waitOnce.Do(func() {
+			waitErr = cmd.Wait()
+		})
+		return waitErr
 	}
 
 	var output bytes.Buffer
@@ -92,27 +106,40 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 		}
 	}()
 
+	// Defer comprehensive cleanup so that process reaping and PTY closing always occur,
+	// preventing zombie (defunct) processes on any error or early return.
+	cleanup := func() {
+		killProcess(cmd)
+		closePTY()
+		<-outDone
+		_ = waitProcess()
+	}
+	defer cleanup()
+
+	// In Go 1.20+, ensure the entire process group is killed and PTY closed
+	// if context is canceled while cmd is running or waiting.
+	cmd.Cancel = func() error {
+		killProcess(cmd)
+		closePTY()
+		return nil
+	}
+
 	startOffset := 0
 
 	// Execute each interaction step
 	for idx, step := range seq.Steps {
 		if ctx.Err() != nil {
-			killProcess(cmd)
-			closePTY()
-			<-outDone
 			return "", ctx.Err()
 		}
 
+		prevOffset := startOffset
 		if step.WaitFor != nil {
 			waitTimeout := step.WaitTimeout
 			if waitTimeout <= 0 {
 				waitTimeout = 30 * time.Second
 			}
-			newOffset, err := waitForPattern(ctx, &output, &bufMu, step.WaitFor, waitTimeout, startOffset)
+			newOffset, err := waitForPattern(ctx, outDone, ptmx, &output, &bufMu, step.WaitFor, waitTimeout, startOffset)
 			if err != nil {
-				killProcess(cmd)
-				closePTY()
-				<-outDone
 				bufMu.Lock()
 				tail := tailLines(output.String(), 20)
 				bufMu.Unlock()
@@ -125,29 +152,38 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 			select {
 			case <-time.After(step.FixedDelay):
 			case <-ctx.Done():
-				killProcess(cmd)
-				closePTY()
-				<-outDone
 				return "", ctx.Err()
+			case <-outDone:
+				return "", errors.New("process terminated unexpectedly during delay")
 			}
 			bufMu.Lock()
 			startOffset = output.Len()
 			bufMu.Unlock()
 		}
 
+		// Determine input: if this step matched a manual Jitsi URL prompt,
+		// provide a fallback Jitsi URL rather than a server index number.
+		input := step.Input
+		bufMu.Lock()
+		if prevOffset < output.Len() && jitsiURLPromptRe.Match(output.Bytes()[prevOffset:]) {
+			input = fallbackJitsiURL
+		}
+		bufMu.Unlock()
+
+		i.logger.Info("executing installer step", "step", idx+1, "total", len(seq.Steps), "input", input)
+
 		// Write input + carriage return to terminal
-		payload := []byte(step.Input + "\r")
+		payload := []byte(input + "\r")
 		if _, err := ptmx.Write(payload); err != nil {
-			killProcess(cmd)
-			closePTY()
-			<-outDone
-			return "", fmt.Errorf("write step %d (%q): %w", idx, step.Input, err)
+			return "", fmt.Errorf("write step %d (%q): %w", idx, input, err)
 		}
 	}
 
+	i.logger.Info("all installer inputs sent, waiting for script to finish...")
+
 	// Wait for process completion or cancellation
-	waitErr := cmd.Wait()
-	closePTY() // Ensure read goroutine can exit even if child processes linger
+	_ = waitProcess()
+	closePTY()
 	<-outDone
 
 	bufMu.Lock()
@@ -184,27 +220,63 @@ func killProcess(cmd *exec.Cmd) {
 	_ = cmd.Process.Kill()
 }
 
-func waitForPattern(ctx context.Context, buf *bytes.Buffer, mu *sync.Mutex, re *regexp.Regexp, timeout time.Duration, startOffset int) (int, error) {
+func waitForPattern(
+	ctx context.Context,
+	outDone <-chan struct{},
+	ptmx *os.File,
+	buf *bytes.Buffer,
+	mu *sync.Mutex,
+	re *regexp.Regexp,
+	timeout time.Duration,
+	startOffset int,
+) (int, error) {
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
+		mu.Lock()
+		var chunk []byte
+		if buf.Len() > startOffset {
+			chunk = buf.Bytes()[startOffset:]
+		}
+		matched := len(chunk) > 0 && re.Match(chunk)
+		curLen := buf.Len()
+
+		// Check if installer unexpectedly prompted for a manual Jitsi URL while we were waiting for another pattern (e.g. Room options)
+		isJitsiURLPrompt := ptmx != nil && len(chunk) > 0 && jitsiURLPromptRe.Match(chunk) && !re.Match(chunk)
+		mu.Unlock()
+
+		if matched {
+			return curLen, nil
+		}
+
+		if isJitsiURLPrompt {
+			// Auto-respond with fallback Jitsi URL and advance offset past this prompt
+			if _, err := ptmx.Write([]byte(fallbackJitsiURL + "\r")); err == nil {
+				time.Sleep(50 * time.Millisecond)
+				startOffset = curLen
+				continue
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return startOffset, ctx.Err()
-		case <-ticker.C:
+		case <-outDone:
+			// Process terminated early, check buffer one last time
 			mu.Lock()
-			var chunk []byte
 			if buf.Len() > startOffset {
 				chunk = buf.Bytes()[startOffset:]
 			}
-			matched := len(chunk) > 0 && re.Match(chunk)
-			curLen := buf.Len()
+			matched = len(chunk) > 0 && re.Match(chunk)
+			curLen = buf.Len()
 			mu.Unlock()
 			if matched {
 				return curLen, nil
 			}
+			return curLen, fmt.Errorf("process terminated unexpectedly while waiting for pattern %s", re.String())
+		case <-ticker.C:
 			if time.Now().After(deadline) {
 				return curLen, fmt.Errorf("timeout waiting for pattern %s", re.String())
 			}

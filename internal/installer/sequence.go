@@ -65,10 +65,10 @@ func BuildSequence(commentPool []int, suffix string) Sequence {
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
-			// 4. Jitsi server: choice from pool
+			// 4. Jitsi server: choice from pool or manual URL fallback
 			{
 				Input:       comment,
-				WaitFor:     regexp.MustCompile(`(?i)(?:jitsi server|by default:\s*1|enter the number)`),
+				WaitFor:     regexp.MustCompile(`(?i)(?:jitsi server|by default:\s*1|enter the number|enter jitsi url)`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},

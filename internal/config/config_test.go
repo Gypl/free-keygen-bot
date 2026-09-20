@@ -98,3 +98,76 @@ telegram:
 		t.Fatal("expected error when allowlist is empty, got nil")
 	}
 }
+
+func TestLoadConfig_EmptyScriptURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+telegram:
+  allowed_user_ids:
+    - 111111
+installer:
+  script_url: "   "
+`
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	t.Setenv("TG_BOT_TOKEN", "mock_token_123")
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("expected error when script_url is empty, got nil")
+	}
+}
+
+func TestLoadConfig_NegativeCooldown(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+telegram:
+  allowed_user_ids:
+    - 111111
+limits:
+  cooldown_per_user: -5m
+`
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	t.Setenv("TG_BOT_TOKEN", "mock_token_123")
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("expected error when cooldown is negative, got nil")
+	}
+}
+
+func TestLoadConfig_CommentPoolEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+telegram:
+  allowed_user_ids:
+    - 111111
+`
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	t.Setenv("TG_BOT_TOKEN", "mock_token_123")
+	t.Setenv("INSTALLER_COMMENT_POOL", "3,8,12")
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.Installer.CommentPool) != 3 || cfg.Installer.CommentPool[0] != 3 || cfg.Installer.CommentPool[1] != 8 || cfg.Installer.CommentPool[2] != 12 {
+		t.Errorf("unexpected comment pool from env: %v", cfg.Installer.CommentPool)
+	}
+}
+

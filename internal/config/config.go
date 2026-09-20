@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ilyakaznacheev/cleanenv"
@@ -19,7 +20,7 @@ type Config struct {
 	Installer struct {
 		ScriptURL     string        `yaml:"script_url" env:"INSTALLER_SCRIPT_URL" env-default:"https://raw.githubusercontent.com/openlibrecommunity/olcrtc/master/install.sh"`
 		Timeout       time.Duration `yaml:"timeout" env:"INSTALLER_TIMEOUT" env-default:"5m"`
-		CommentPool   []int         `yaml:"comment_pool"`
+		CommentPool   []int         `yaml:"comment_pool" env:"INSTALLER_COMMENT_POOL" env-separator:","`
 		CommentSuffix string        `yaml:"comment_suffix" env:"INSTALLER_COMMENT_SUFFIX" env-default:"welcome"`
 	} `yaml:"installer"`
 
@@ -69,12 +70,20 @@ func Load(configPath string) (*Config, error) {
 		return nil, errors.New("config: allowed_user_ids cannot be empty")
 	}
 
+	if strings.TrimSpace(cfg.Installer.ScriptURL) == "" {
+		return nil, errors.New("config: installer script_url cannot be empty")
+	}
+
 	if cfg.Installer.Timeout <= 0 {
 		return nil, errors.New("config: installer timeout must be positive")
 	}
 
+	if cfg.Limits.CooldownPerUser < 0 {
+		return nil, errors.New("config: cooldown must be non-negative")
+	}
+
 	if len(cfg.Installer.CommentPool) == 0 {
-		cfg.Installer.CommentPool = []int{1, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15}
+		cfg.Installer.CommentPool = []int{1, 4, 5, 6, 9, 10, 11, 12, 14, 15}
 	}
 
 	if cfg.Installer.CommentSuffix == "" {
