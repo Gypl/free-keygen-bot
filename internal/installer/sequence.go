@@ -47,42 +47,42 @@ func BuildSequence(commentPool []int, suffix string) Sequence {
 			// 1. Mode: server (srv)
 			{
 				Input:       "1",
-				WaitFor:     regexp.MustCompile(`(?i)(?:choice\s*\[1-2|select mode)`),
+				WaitFor:     regexp.MustCompile(`(?i)Enter choice\s*\[1-2`),
 				WaitTimeout: 2 * time.Minute, // Allow time for initial package installation (git, podman)
 				FixedDelay:  delay,
 			},
 			// 2. Provider: jitsi
 			{
 				Input:       "1",
-				WaitFor:     regexp.MustCompile(`(?i)(?:choice\s*\[1-3|select provider)`),
+				WaitFor:     regexp.MustCompile(`(?i)Enter choice\s*\[1-3`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 3. Transport: datachannel
 			{
 				Input:       "1",
-				WaitFor:     regexp.MustCompile(`(?i)(?:choice\s*\[1-4|select transport)`),
+				WaitFor:     regexp.MustCompile(`(?i)Enter choice\s*\[1-4`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 4. Jitsi server: choice from pool or manual URL fallback
 			{
 				Input:       comment,
-				WaitFor:     regexp.MustCompile(`(?i)(?:jitsi server|by default:\s*1|enter the number|enter jitsi url)`),
+				WaitFor:     regexp.MustCompile(`(?i)(?:Enter the number\s*\[|by default:\s*1|jitsi server|enter jitsi url)`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 5. Room options: auto-generate new room
 			{
 				Input:       "1",
-				WaitFor:     regexp.MustCompile(`(?i)(?:room options|choice\s*\[1-2)`),
+				WaitFor:     regexp.MustCompile(`(?i)(?:room options|Enter choice\s*\[1-2)`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 6. DNS server: accept default (8.8.8.8:53)
 			{
 				Input:       "",
-				WaitFor:     regexp.MustCompile(`(?i)dns server`),
+				WaitFor:     regexp.MustCompile(`(?i)dns server\s*\[default`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
@@ -97,7 +97,7 @@ func BuildSequence(commentPool []int, suffix string) Sequence {
 			{
 				Input:       comment + suffix,
 				WaitFor:     regexp.MustCompile(`(?i)comment for the config`),
-				WaitTimeout: 5 * time.Minute, // Podman pull, go build, and container run
+				WaitTimeout: 10 * time.Minute, // Podman pull, go build, and container run
 				FixedDelay:  delay,
 			},
 		},

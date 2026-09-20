@@ -19,7 +19,7 @@ type Config struct {
 
 	Installer struct {
 		ScriptURL     string        `yaml:"script_url" env:"INSTALLER_SCRIPT_URL" env-default:"https://raw.githubusercontent.com/openlibrecommunity/olcrtc/master/install.sh"`
-		Timeout       time.Duration `yaml:"timeout" env:"INSTALLER_TIMEOUT" env-default:"5m"`
+		Timeout       time.Duration `yaml:"timeout" env:"INSTALLER_TIMEOUT" env-default:"10m"`
 		CommentPool   []int         `yaml:"comment_pool" env:"INSTALLER_COMMENT_POOL" env-separator:","`
 		CommentSuffix string        `yaml:"comment_suffix" env:"INSTALLER_COMMENT_SUFFIX" env-default:"welcome"`
 	} `yaml:"installer"`

@@ -170,12 +170,29 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 		}
 		bufMu.Unlock()
 
+		// Pause briefly before sending input so interactive prompts and PTY are fully ready
+		select {
+		case <-time.After(300 * time.Millisecond):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-outDone:
+			return "", errors.New("process terminated unexpectedly before input")
+		}
+
 		i.logger.Info("executing installer step", "step", idx+1, "total", len(seq.Steps), "input", input)
 
 		// Write input + carriage return to terminal
 		payload := []byte(input + "\r")
 		if _, err := ptmx.Write(payload); err != nil {
 			return "", fmt.Errorf("write step %d (%q): %w", idx, input, err)
+		}
+
+		// Pause briefly after sending input to allow the shell to process and echo
+		select {
+		case <-time.After(300 * time.Millisecond):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-outDone:
 		}
 	}
 
