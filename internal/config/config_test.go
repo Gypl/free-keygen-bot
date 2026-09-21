@@ -171,3 +171,38 @@ telegram:
 	}
 }
 
+func TestLoadConfig_Defaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	yamlContent := `
+telegram:
+  allowed_user_ids:
+    - 111111
+`
+	if err := os.WriteFile(configPath, []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	t.Setenv("TG_BOT_TOKEN", "mock_token_123")
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Installer.Timeout != 15*time.Minute {
+		t.Errorf("expected default timeout 15m, got %v", cfg.Installer.Timeout)
+	}
+
+	expectedPool := []int{1, 2, 3, 4, 5, 6}
+	if len(cfg.Installer.CommentPool) != len(expectedPool) {
+		t.Fatalf("expected comment pool length %d, got %d", len(expectedPool), len(cfg.Installer.CommentPool))
+	}
+	for i, v := range expectedPool {
+		if cfg.Installer.CommentPool[i] != v {
+			t.Errorf("expected pool[%d]=%d, got %d", i, v, cfg.Installer.CommentPool[i])
+		}
+	}
+}
+

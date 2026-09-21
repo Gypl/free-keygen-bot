@@ -91,4 +91,7 @@ func TestAuditLogger(t *testing.T) {
 	if auditData["status"] != "SUCCESS" {
 		t.Errorf("expected status SUCCESS, got %v", auditData["status"])
 	}
+	if int64(auditData["duration_ms"].(float64)) != 1500 {
+		t.Errorf("expected duration_ms 1500, got %v", auditData["duration_ms"])
+	}
 }

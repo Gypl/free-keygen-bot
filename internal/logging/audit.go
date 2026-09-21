@@ -40,7 +40,7 @@ func (a *AuditLogger) Log(ctx context.Context, event AuditEvent) {
 		attrs = append(attrs, slog.String("reason", event.Reason))
 	}
 	if event.Duration > 0 {
-		attrs = append(attrs, slog.Duration("duration_ms", event.Duration))
+		attrs = append(attrs, slog.Int64("duration_ms", event.Duration.Milliseconds()))
 	}
 
 	anyList := make([]any, len(attrs))

@@ -178,6 +178,13 @@ func (h *Handler) HandleDeploy(ctx context.Context, msg *tgbotapi.Message) {
 	}
 	defer h.installLock.Unlock()
 
+	// Ensure cooldown is updated on attempt exit (whether success, failure, or timeout)
+	// to prevent DoS via repeated failed installs.
+	h.cooldowns.Store(userID, time.Now())
+	defer func() {
+		h.cooldowns.Store(userID, time.Now())
+	}()
+
 	// 4. Send acknowledgment status message
 	h.logger.Info("starting vpn installation", "user_id", userID, "username", username)
 	h.sendPlain(chatID, "⏳ Запускаю установку... Это может занять 2–4 минуты (скачивание образов и компиляция). Пожалуйста, подождите.")
@@ -210,7 +217,7 @@ func (h *Handler) HandleDeploy(ctx context.Context, msg *tgbotapi.Message) {
 			Reason:   err.Error(),
 			Duration: duration,
 		})
-		h.sendPlain(chatID, fmt.Sprintf("❌ Ошибка установки: %v", err))
+		h.sendPlain(chatID, "❌ Ошибка установки. Обратитесь к администратору.")
 		return
 	}
 

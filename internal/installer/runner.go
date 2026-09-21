@@ -54,18 +54,12 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 
 	seq := BuildSequence(i.commentPool, i.commentSuffix)
 
-	shellCmd := fmt.Sprintf("curl -fsSL %q | bash", i.scriptURL)
+	// Remove any existing encryption key file to ensure each deployment gets a fresh, unique key
+	shellCmd := fmt.Sprintf("rm -f \"$HOME/.olcrtc_key\" && curl -fsSL %q | bash", i.scriptURL)
 	cmd := exec.CommandContext(ctx, "bash", "-c", shellCmd)
 	cmd.WaitDelay = 5 * time.Second
 
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return "", fmt.Errorf("failed to start pty: %w", err)
-	}
-
-	// Use sync.Once to ensure PTY master is closed exactly once.
-	// Closing the master guarantees the read goroutine unblocks (gets EIO/EBADF)
-	// even if child processes still hold the PTY slave fd open.
+	var ptmx *os.File
 	var ptmxCloseOnce sync.Once
 	closePTY := func() {
 		ptmxCloseOnce.Do(func() {
@@ -73,6 +67,19 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 				_ = ptmx.Close()
 			}
 		})
+	}
+
+	// Set cmd.Cancel BEFORE pty.Start (which calls cmd.Start internally)
+	cmd.Cancel = func() error {
+		killProcess(cmd)
+		closePTY()
+		return nil
+	}
+
+	var err error
+	ptmx, err = pty.Start(cmd)
+	if err != nil {
+		return "", fmt.Errorf("failed to start pty: %w", err)
 	}
 
 	var (
@@ -116,13 +123,15 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 	}
 	defer cleanup()
 
-	// In Go 1.20+, ensure the entire process group is killed and PTY closed
-	// if context is canceled while cmd is running or waiting.
-	cmd.Cancel = func() error {
-		killProcess(cmd)
-		closePTY()
-		return nil
-	}
+	// Proactively kill process group and close PTY if context is canceled
+	go func() {
+		select {
+		case <-ctx.Done():
+			killProcess(cmd)
+			closePTY()
+		case <-outDone:
+		}
+	}()
 
 	startOffset := 0
 

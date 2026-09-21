@@ -19,7 +19,7 @@ type Config struct {
 
 	Installer struct {
 		ScriptURL     string        `yaml:"script_url" env:"INSTALLER_SCRIPT_URL" env-default:"https://raw.githubusercontent.com/openlibrecommunity/olcrtc/master/install.sh"`
-		Timeout       time.Duration `yaml:"timeout" env:"INSTALLER_TIMEOUT" env-default:"10m"`
+		Timeout       time.Duration `yaml:"timeout" env:"INSTALLER_TIMEOUT" env-default:"15m"`
 		CommentPool   []int         `yaml:"comment_pool" env:"INSTALLER_COMMENT_POOL" env-separator:","`
 		CommentSuffix string        `yaml:"comment_suffix" env:"INSTALLER_COMMENT_SUFFIX" env-default:"welcome"`
 	} `yaml:"installer"`
@@ -83,7 +83,7 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	if len(cfg.Installer.CommentPool) == 0 {
-		cfg.Installer.CommentPool = []int{1, 4, 5, 6, 9, 10, 11, 12, 14, 15}
+		cfg.Installer.CommentPool = []int{1, 2, 3, 4, 5, 6}
 	}
 
 	if cfg.Installer.CommentSuffix == "" {

@@ -308,19 +308,51 @@ func TestHandleDeploy_ProcessError(t *testing.T) {
 	msgs := sender.getMessages()
 	foundErrMsg := false
 	for _, m := range msgs {
-		if strings.Contains(m.Text, "Ошибка установки") && strings.Contains(m.Text, "network failure") {
+		if strings.Contains(m.Text, "Ошибка установки") {
 			foundErrMsg = true
+			if strings.Contains(m.Text, "network failure") {
+				t.Errorf("error details leaked in telegram message: %s", m.Text)
+			}
 			break
 		}
 	}
 	if !foundErrMsg {
-		t.Errorf("expected error message with details, got: %v", msgs)
+		t.Errorf("expected error message, got: %v", msgs)
 	}
 
 	// Lock released
 	h.HandleDeploy(context.Background(), makeMessage(100, "alice", 100, "deploy"))
 	if atomic.LoadInt64(&deployer.callCount) != 2 {
 		t.Errorf("lock was not released after process error")
+	}
+}
+
+func TestHandleDeploy_CooldownOnFailure(t *testing.T) {
+	sender := &mockSender{}
+	deployer := &mockDeployer{
+		deployFunc: func(ctx context.Context) (string, error) {
+			return "", errors.New("transient failure")
+		},
+	}
+	cooldown := 10 * time.Minute
+	h := newTestHandler(sender, []int64{100}, cooldown, deployer)
+
+	// First deploy fails
+	h.HandleDeploy(context.Background(), makeMessage(100, "alice", 100, "deploy"))
+	if atomic.LoadInt64(&deployer.callCount) != 1 {
+		t.Fatalf("expected 1 deploy call, got %d", deployer.callCount)
+	}
+
+	sender.clear()
+
+	// Immediate second deploy must be rejected due to cooldown
+	h.HandleDeploy(context.Background(), makeMessage(100, "alice", 100, "deploy"))
+	if atomic.LoadInt64(&deployer.callCount) != 1 {
+		t.Errorf("deployer should NOT have been called during cooldown after failure, count: %d", deployer.callCount)
+	}
+	msgs := sender.getMessages()
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Text, "Подождите ещё") {
+		t.Errorf("expected cooldown warning after failure, got: %v", msgs)
 	}
 }
 
