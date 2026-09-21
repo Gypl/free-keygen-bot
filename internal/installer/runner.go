@@ -100,14 +100,34 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 	go func() {
 		defer close(outDone)
 		buf := make([]byte, 1024)
+		var lineBuf bytes.Buffer
 		for {
 			n, readErr := ptmx.Read(buf)
 			if n > 0 {
 				bufMu.Lock()
 				output.Write(buf[:n])
 				bufMu.Unlock()
+
+				for _, b := range buf[:n] {
+					if b == '\n' {
+						raw := lineBuf.String()
+						lineBuf.Reset()
+						clean := strings.TrimSpace(ansiRe.ReplaceAllString(raw, ""))
+						if clean != "" {
+							i.logger.Info("terminal_output", "line", clean)
+						}
+					} else if b != '\r' {
+						lineBuf.WriteByte(b)
+					}
+				}
 			}
 			if readErr != nil {
+				if lineBuf.Len() > 0 {
+					clean := strings.TrimSpace(ansiRe.ReplaceAllString(lineBuf.String(), ""))
+					if clean != "" {
+						i.logger.Info("terminal_output", "line", clean)
+					}
+				}
 				break
 			}
 		}
@@ -173,9 +193,19 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 		// Determine input: if this step matched a manual Jitsi URL prompt,
 		// provide a fallback Jitsi URL rather than a server index number.
 		input := step.Input
+		inputDesc := step.InputDesc
+		var promptText string
 		bufMu.Lock()
-		if prevOffset < output.Len() && jitsiURLPromptRe.Match(output.Bytes()[prevOffset:]) {
-			input = fallbackJitsiURL
+		if prevOffset < output.Len() {
+			chunk := ansiRe.ReplaceAllString(output.String()[prevOffset:startOffset], "")
+			lines := strings.Split(strings.TrimSpace(chunk), "\n")
+			if len(lines) > 0 {
+				promptText = strings.TrimSpace(lines[len(lines)-1])
+			}
+			if jitsiURLPromptRe.Match(output.Bytes()[prevOffset:]) {
+				input = fallbackJitsiURL
+				inputDesc = "fallback Jitsi URL: " + fallbackJitsiURL
+			}
 		}
 		bufMu.Unlock()
 
@@ -188,7 +218,14 @@ func (i *Installer) Deploy(ctx context.Context) (string, error) {
 			return "", errors.New("process terminated unexpectedly before input")
 		}
 
-		i.logger.Info("executing installer step", "step", idx+1, "total", len(seq.Steps), "input", input)
+		i.logger.Info("installer_menu_choice",
+			"step", idx+1,
+			"total", len(seq.Steps),
+			"menu", step.Name,
+			"prompt", promptText,
+			"answer", input,
+			"description", inputDesc,
+		)
 
 		// Write input + carriage return to terminal
 		payload := []byte(input + "\r")

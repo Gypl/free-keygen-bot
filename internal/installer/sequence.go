@@ -10,7 +10,9 @@ import (
 
 // Step represents a single interaction step in the console installer session.
 type Step struct {
+	Name        string         // Descriptive menu name (e.g. "Select mode")
 	Input       string         // Text to send to PTY (carriage return is appended automatically)
+	InputDesc   string         // Human-readable description of choice (e.g. "server (srv)")
 	WaitFor     *regexp.Regexp // Optional: regexp pattern to wait for in output before sending input
 	WaitTimeout time.Duration  // Max duration to wait for WaitFor pattern
 	FixedDelay  time.Duration  // Fallback delay before sending input if WaitFor is not set
@@ -46,56 +48,72 @@ func BuildSequence(commentPool []int, suffix string) Sequence {
 		Steps: []Step{
 			// 1. Mode: server (srv)
 			{
+				Name:        "Select mode",
 				Input:       "1",
+				InputDesc:   "server (srv)",
 				WaitFor:     regexp.MustCompile(`(?i)Enter choice\s*\[1-2`),
 				WaitTimeout: 2 * time.Minute, // Allow time for initial package installation (git, podman)
 				FixedDelay:  delay,
 			},
 			// 2. Provider: jitsi
 			{
+				Name:        "Select provider",
 				Input:       "1",
+				InputDesc:   "jitsi",
 				WaitFor:     regexp.MustCompile(`(?i)Enter choice\s*\[1-3`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 3. Transport: datachannel
 			{
+				Name:        "Select transport",
 				Input:       "1",
+				InputDesc:   "datachannel",
 				WaitFor:     regexp.MustCompile(`(?i)Enter choice\s*\[1-4`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 4. Jitsi server: choice from pool or manual URL fallback
 			{
+				Name:        "Select Jitsi server",
 				Input:       comment,
+				InputDesc:   "server #" + comment + " from pool",
 				WaitFor:     regexp.MustCompile(`(?i)(?:Enter the number\s*\[|by default:\s*1|jitsi server|enter jitsi url)`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 5. Room options: auto-generate new room
 			{
+				Name:        "Room options",
 				Input:       "1",
+				InputDesc:   "auto-generate new room",
 				WaitFor:     regexp.MustCompile(`(?i)(?:room options|Enter choice\s*\[1-2)`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 6. DNS server: accept default (8.8.8.8:53)
 			{
+				Name:        "DNS server",
 				Input:       "",
+				InputDesc:   "default (8.8.8.8:53)",
 				WaitFor:     regexp.MustCompile(`(?i)dns server\s*\[default`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 7. SOCKS5 proxy: no
 			{
+				Name:        "SOCKS5 proxy for egress",
 				Input:       "n",
+				InputDesc:   "no (direct egress)",
 				WaitFor:     regexp.MustCompile(`(?i)(?:socks5 proxy for egress|y/N)`),
 				WaitTimeout: 30 * time.Second,
 				FixedDelay:  delay,
 			},
 			// 8. Config comment: comment + suffix (wait for build and container launch)
 			{
+				Name:        "Config comment",
 				Input:       comment + suffix,
+				InputDesc:   comment + suffix,
 				WaitFor:     regexp.MustCompile(`(?i)comment for the config`),
 				WaitTimeout: 10 * time.Minute, // Podman pull, go build, and container run
 				FixedDelay:  delay,

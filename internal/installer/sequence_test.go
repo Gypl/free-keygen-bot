@@ -72,10 +72,16 @@ func TestBuildSequence(t *testing.T) {
 		t.Errorf("step 7: expected suffix %q, got %q", suffix, seq.Steps[7].Input)
 	}
 
-	// Verify all steps have a non-nil WaitFor pattern
+	// Verify all steps have a non-nil WaitFor pattern, non-empty Name and InputDesc
 	for idx, step := range seq.Steps {
 		if step.WaitFor == nil {
 			t.Errorf("step %d has nil WaitFor pattern", idx)
+		}
+		if step.Name == "" {
+			t.Errorf("step %d has empty Name", idx)
+		}
+		if step.InputDesc == "" {
+			t.Errorf("step %d has empty InputDesc", idx)
 		}
 	}
 }
