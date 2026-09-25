@@ -98,15 +98,28 @@ docker compose down
 
 > **Важно**: Контейнер запускается с `network_mode: host` и `privileged: true`, так как инсталлятор `olcrtc` разворачивает VPN-сервер внутри собственного Podman-контейнера и требует прямого доступа к сетевым интерфейсам хоста.
 
-### 5. Локальный запуск без Docker
+### 5. Локальный запуск (Нативная установка)
+
+Вы можете запустить бота прямо на сервере без Docker (например, если возникают проблемы с cgroups внутри контейнера) при помощи предоставляемого `systemd` шаблона.
 
 ```bash
-# Сборка
+# 1. Сборка бинарника
 make build
 
-# Запуск
-./bot --config configs/config.yaml
+# 2. Скопируйте бинарник в /usr/local/bin или рабочую директорию бота
+sudo cp bot /usr/local/bin/telegram-vpn-deploy-bot
+
+# 3. Скопируйте и настройте service файл
+sudo cp scripts/telegram-vpn-bot.service /etc/systemd/system/
+# Отредактируйте ExecStart и WorkingDirectory внутри /etc/systemd/system/telegram-vpn-bot.service
+
+# 4. Активируйте и запустите службу
+sudo systemctl daemon-reload
+sudo systemctl enable --now telegram-vpn-bot
+sudo systemctl status telegram-vpn-bot
 ```
+
+> Не забудьте указать `app.execution_mode: "systemd"` в `config.yaml` для соответствующего логирования.
 
 ---
 

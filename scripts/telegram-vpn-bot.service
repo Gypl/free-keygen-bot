@@ -1,0 +1,24 @@
+[Unit]
+Description=Telegram VPN Deploy Bot
+After=network.target
+
+[Service]
+Type=simple
+# Ensure you set the correct path to the binary and your working directory.
+# Example:
+# ExecStart=/opt/telegram-vpn-bot/telegram-vpn-deploy-bot -config /opt/telegram-vpn-bot/config.yaml
+ExecStart=/path/to/telegram-vpn-deploy-bot -config /path/to/config.yaml
+WorkingDirectory=/path/to/
+
+# Automatic restart on crash
+Restart=on-failure
+RestartSec=5s
+
+# Security and isolation
+ProtectSystem=strict
+NoNewPrivileges=true
+# Depending on the VPN installer script requirements, it might need to run as root.
+# Otherwise, set User=... and Group=... appropriately.
+
+[Install]
+WantedBy=multi-user.target

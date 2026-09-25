@@ -12,6 +12,10 @@ import (
 )
 
 type Config struct {
+	App struct {
+		ExecutionMode string `yaml:"execution_mode" env:"EXECUTION_MODE" env-default:"docker"`
+	} `yaml:"app"`
+
 	Telegram struct {
 		BotToken       string  `yaml:"-" env:"TG_BOT_TOKEN" env-required:"true"`
 		AllowedUserIDs []int64 `yaml:"allowed_user_ids" env:"TG_ALLOWED_USER_IDS" env-separator:","`
@@ -62,6 +66,10 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	// Invariant validations
+	if cfg.App.ExecutionMode != "docker" && cfg.App.ExecutionMode != "systemd" {
+		return nil, fmt.Errorf("config: invalid execution_mode %q, expected 'docker' or 'systemd'", cfg.App.ExecutionMode)
+	}
+
 	if cfg.Telegram.BotToken == "" {
 		return nil, errors.New("config: TG_BOT_TOKEN is required and cannot be empty")
 	}

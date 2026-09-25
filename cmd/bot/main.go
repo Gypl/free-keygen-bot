@@ -31,6 +31,7 @@ func main() {
 	auditLogger := logging.NewAuditLogger(logger)
 
 	logger.Info("starting telegram vpn deploy bot",
+		"execution_mode", cfg.App.ExecutionMode,
 		"allowed_users_count", len(cfg.Telegram.AllowedUserIDs),
 		"installer_timeout", cfg.Installer.Timeout,
 		"cooldown", cfg.Limits.CooldownPerUser,
